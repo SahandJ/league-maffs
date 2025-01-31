@@ -1,96 +1,147 @@
-// --- Canvas Setup for Heatmap ---
-const canvas = document.getElementById('heatmap');
-const ctx = canvas.getContext('2d');
-const width = canvas.width;
-const height = canvas.height;
-
-// --- Function to calculate damage (JavaScript version) ---
-function magicDamage(ap, ratio, base) {
-    return base + ratio * ap;
-}
-
-function postMitigationDamage(ap, mr, ratio, base) {
-    const damage = magicDamage(ap, ratio, base);
-    return damage * (100 / (100 + mr));
-}
-
-function calculateComparison(ap, mr, ratio, base, pen) {
-    const r = postMitigationDamage((ap + 130) * 1.3, mr - pen, ratio, base);
-    const v = postMitigationDamage(ap + 95, (mr * 0.6) - pen, ratio, base);
-    if (r > v) return 1;
-    if (r < v) return -1;
-    return 0;
-}
-
-// --- Parameter Ranges ---
-const apValues = [];
-for (let ap = 0; ap <= 1000; ap += 5) {
-    apValues.push(ap);
-}
-const mrValues = [];
-for (let mr = 50; mr <= 250; mr += 2.5) {
-    mrValues.push(mr);
-}
-
-// --- Slider Elements ---
-const ratioSlider = document.getElementById('ratio-slider');
-const baseSlider = document.getElementById('base-slider');
-const penSlider = document.getElementById('pen-slider');
-const ratioValue = document.getElementById('ratio-value');
-const baseValue = document.getElementById('base-value');
-const penValue = document.getElementById('pen-value');
-
-// --- Update Function ---
-function updateHeatmap() {
-    const ratio = parseFloat(ratioSlider.value);
-    const base = parseInt(baseSlider.value);
-    const pen = parseInt(penSlider.value);
-
-    ratioValue.textContent = ratio.toFixed(1);
-    baseValue.textContent = base;
-    penValue.textContent = pen;
-
-    const imageData = ctx.createImageData(width, height);
-    const data = imageData.data;
-
-    for (let i = 0; i < mrValues.length; i++) {
-        for (let j = 0; j < apValues.length; j++) {
-            const ap = apValues[j];
-            const mr = mrValues[i];
-            const result = calculateComparison(ap, mr, ratio, base, pen);
-
-            const x = j / apValues.length * width;
-            const y = i / mrValues.length * height;
-
-            let red = 0;
-            let green = 0;
-            let blue = 0;
-
-            if (result === 1) {
-                red = 255; // Rabadon's
-            } else if (result === -1) {
-                blue = 255; // Void Staff
-            } else {
-                red = 200
-                blue = 200
-                green = 200
-            }
-
-            const pixelIndex = ((height - 1 - Math.floor(y)) * width + Math.floor(x)) * 4;
-            data[pixelIndex] = red;     // Red
-            data[pixelIndex + 1] = green; // Green
-            data[pixelIndex + 2] = blue;  // Blue
-            data[pixelIndex + 3] = 255;   // Alpha (opacity)
-        }
+function linspace(start, stop, num) {
+    const step = (stop - start) / (num - 1);
+    const result = [];
+    for (let i = start; i <= stop; i += step) {
+        result.push(i);
     }
-
-    ctx.putImageData(imageData, 0, 0);
+    return result;
 }
 
-// --- Event Listeners for Sliders ---
-ratioSlider.addEventListener('input', updateHeatmap);
-baseSlider.addEventListener('input', updateHeatmap);
-penSlider.addEventListener('input', updateHeatmap);
 
-// --- Initial Update ---
-updateHeatmap();
+function calcDmg(ap, enemy_mr, flat_pen, mdBase, mdRatio, tdBase, tdRatio, percentage_pen) {
+    let new_mr = (enemy_mr * (1 - percentage_pen)) - flat_pen;
+
+    let magic_damage = mdBase + (mdRatio * ap);
+    let post_mitigation_magic_damage = magic_damage * (100 / (100 + new_mr));
+
+    let true_damage = tdBase + (tdRatio * ap)
+
+    return post_mitigation_magic_damage + true_damage;
+}
+
+function compareItems(current_dmg, ap, mr, flatPen, mdBase, mdRatio, tdBase, tdRatio, cmp_type, includeGold) {
+    let r = calcDmg((ap + 130) * 1.3, mr, flatPen, mdBase, mdRatio, tdBase, tdRatio, 0)
+    let v = calcDmg(ap + 95, mr, flatPen, mdBase, mdRatio, tdBase, tdRatio, 0.4)
+
+    const diff = v - r
+
+    if (cmp_type === "percentage") {
+        return diff / current_dmg * 100
+    } else {
+        return diff
+    }
+}
+
+const apValues = linspace(0, 500, 200)
+const mrValues = linspace(30, 200, 200);
+
+
+function updatePlot() {
+    const flatPen = parseFloat(document.getElementById("flatPen").value);
+
+    // Magic Damage Sliders
+    const mdRatio = parseFloat(document.getElementById("md-ratio").value);
+    const mdBase = parseFloat(document.getElementById("md-base").value);
+
+    // True Damage Sliders
+    const tdRatio = parseFloat(document.getElementById("td-ratio").value);
+    const tdBase = parseFloat(document.getElementById("td-base").value);
+
+    const includeGold = document.querySelector('input[name="gold"]').checked
+    const compareType = document.querySelector('input[name="cmpType"]:checked').value;
+
+    let minDiff = Infinity;
+    let maxDiff = -Infinity;
+    // Calculate the result matrix
+    const resultMatrix = mrValues.map(mr =>
+        apValues.map(ap => {
+            const current = calcDmg(ap, mr, flatPen, mdBase, mdRatio, tdBase, tdRatio, 0)
+            const diff = compareItems(current, ap, mr, flatPen, mdBase, mdRatio, tdBase, tdRatio, compareType, includeGold);
+            minDiff = Math.min(minDiff, diff);
+            maxDiff = Math.max(maxDiff, diff);
+            return diff
+        })
+    )
+
+    // Too lazy to fix colouring
+    // Ensure that there's always a neg/pos value for zmin/zmax to maintain color legend
+    const zmin = Math.min(minDiff, 0);
+    const zmax = Math.max(maxDiff, 0);
+
+    // Determine zeroOffset so that it's always white
+    let zeroOffset = (-zmin / (zmax - zmin))
+
+    // Create the Plotly heatmap trace
+    const data = [{
+        z: resultMatrix,
+        x: apValues,
+        y: mrValues,
+        type: 'heatmap',
+        colorscale: [
+            [0, 'rgb(255, 0, 0)'],       // Red for Rabadon's
+            [zeroOffset, 'rgb(255, 255, 255)'], // White at 0
+            [1, 'rgb(0, 0, 255)'],       // Blue for Void Staff
+        ],
+        reversescale: false,
+        zmin: zmin,
+        zmax: zmax,
+        colorbar: {
+            len: 1.05
+        }
+    }];
+
+    const layout = {
+        xaxis: {title: 'AP'},
+        yaxis: {title: 'MR'},
+        autosize: true,
+        margin: {
+            l: 50,
+            r: 50,
+            b: 50,
+            t: 50,
+            pad: 4
+        }
+    };
+
+    Plotly.newPlot('plot', data, layout);
+}
+
+function resizeSliders() {
+    const plot = document.getElementById('plot');
+    const sliders = document.querySelector('.sliders');
+
+    if (plot && sliders) {
+        const plotWidth = plot.offsetWidth;
+        sliders.style.width = `${plotWidth}px`;
+    }
+}
+
+// Initialize Plotly plot
+updatePlot();
+
+
+// Add event listeners to radio buttons
+document.querySelectorAll('input[name="cmpType"]').forEach(radio => {
+    radio.addEventListener('change', updatePlot);
+});
+
+// Add event listeners to sliders
+["flatPen", "md-base", "md-ratio", "td-base", "td-ratio"].forEach(inputId => {
+    const input = document.getElementById(inputId);
+    const valueDisplay = document.getElementById(`${inputId}-value`);
+
+    if (valueDisplay) {
+        input.addEventListener('input', () => {
+            valueDisplay.textContent = input.value;
+            updatePlot();
+        });
+    } else {
+        input.addEventListener('input', updatePlot);
+    }
+});
+
+document.querySelector('input[name="gold"]').addEventListener('change', updatePlot);
+
+// Call resizeSliders initially and on window resize
+resizeSliders();
+window.addEventListener('resize', resizeSliders);
