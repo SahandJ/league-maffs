@@ -20,10 +20,19 @@ function calcDmg(ap, enemy_mr, flat_pen, mdBase, mdRatio, tdBase, tdRatio, perce
 }
 
 function compareItems(current_dmg, ap, mr, flatPen, mdBase, mdRatio, tdBase, tdRatio, cmp_type, includeGold) {
-    let r = calcDmg((ap + 130) * 1.3, mr, flatPen, mdBase, mdRatio, tdBase, tdRatio, 0)
-    let v = calcDmg(ap + 95, mr, flatPen, mdBase, mdRatio, tdBase, tdRatio, 0.4)
+    let vDmg = calcDmg(ap + 95, mr, flatPen, mdBase, mdRatio, tdBase, tdRatio, 0.4)
+    let rDmg = calcDmg((ap + 130) * 1.3, mr, flatPen, mdBase, mdRatio, tdBase, tdRatio, 0)
 
-    const diff = v - r
+
+    const vDmgPerGold = vDmg / 3000;
+    const rDmgPerGold = rDmg / 3600;
+
+    let diff;
+    if (includeGold) {
+        diff = (vDmgPerGold * vDmg) - (rDmgPerGold * rDmg)
+    } else {
+        diff = vDmg - rDmg
+    }
 
     if (cmp_type === "percentage") {
         return diff / current_dmg * 100
